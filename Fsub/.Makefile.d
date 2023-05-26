@@ -1,3 +1,6 @@
+CaptureSets.vo CaptureSets.glob CaptureSets.v.beautified CaptureSets.required_vo: CaptureSets.v 
+CaptureSets.vio: CaptureSets.v 
+CaptureSets.vos CaptureSets.vok CaptureSets.required_vos: CaptureSets.v 
 Fsub_LetSum_Definitions.vo Fsub_LetSum_Definitions.glob Fsub_LetSum_Definitions.v.beautified Fsub_LetSum_Definitions.required_vo: Fsub_LetSum_Definitions.v CaptureSets.vo
 Fsub_LetSum_Definitions.vio: Fsub_LetSum_Definitions.v CaptureSets.vio
 Fsub_LetSum_Definitions.vos Fsub_LetSum_Definitions.vok Fsub_LetSum_Definitions.required_vos: Fsub_LetSum_Definitions.v CaptureSets.vos
@@ -10,6 +13,3 @@ Fsub_LetSum_Lemmas.vos Fsub_LetSum_Lemmas.vok Fsub_LetSum_Lemmas.required_vos: F
 Fsub_LetSum_Soundness.vo Fsub_LetSum_Soundness.glob Fsub_LetSum_Soundness.v.beautified Fsub_LetSum_Soundness.required_vo: Fsub_LetSum_Soundness.v Fsub_LetSum_Lemmas.vo
 Fsub_LetSum_Soundness.vio: Fsub_LetSum_Soundness.v Fsub_LetSum_Lemmas.vio
 Fsub_LetSum_Soundness.vos Fsub_LetSum_Soundness.vok Fsub_LetSum_Soundness.required_vos: Fsub_LetSum_Soundness.v Fsub_LetSum_Lemmas.vos
-CaptureSets.vo CaptureSets.glob CaptureSets.v.beautified CaptureSets.required_vo: CaptureSets.v 
-CaptureSets.vio: CaptureSets.v 
-CaptureSets.vos CaptureSets.vok CaptureSets.required_vos: CaptureSets.v 

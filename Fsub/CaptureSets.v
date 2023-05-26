@@ -335,7 +335,7 @@ Proof with auto.
   rewrite cset_subset_iff.
   unfold cset_subset_dec.
   destruct c...
-  assert (AtomSetImpl.subset t t = true). { rewrite <- AtomSetFacts.subset_iff. fsetdec. }
+  assert (AtomSetImpl.subset t t = true). { rewrite <- AtomSetFacts.subset_iff. intro. intro. assumption. }
   assert (NatSetImpl.subset t0 t0 = true). { rewrite <- NatSetFacts.subset_iff. fnsetdec. }
   intuition.
 Qed.
@@ -366,8 +366,8 @@ Ltac csethyp := try autounfold with cset_scope in *; try simpl_in_cset.
 (* Uses facts about the underlying sets to simplify hypothesis and solve the goal *)
 Ltac csetdec := repeat (
   try csethyp ;
-  (try rewrite <- NatSetFacts.mem_iff in * ; try fnsetdec) ||
-  (try rewrite <- AtomSetFacts.mem_iff in * ; try fsetdec)
+  (try rewrite <- NatSetFacts.mem_iff in * ; try fnsetdec; try nnotin_solve) ||
+  (try rewrite <- AtomSetFacts.mem_iff in * ; try fsetdec; try solve_notin)
 ).
 
 Hint Constructors cset_subset_prop : core.

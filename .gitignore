@@ -8,7 +8,6 @@
 *.bak
 *.mk*
 coqsplit*
-_CoqProject
 *_full.v
 *_sol.v
 .lia.cache

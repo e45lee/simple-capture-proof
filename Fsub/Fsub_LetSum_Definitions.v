@@ -41,35 +41,27 @@ Require Export String.
     indices for bound expression variables.  We make this explicit in
     the definitions below of the opening operations. *)
 
-Inductive shp : Set :=
+Inductive shp : Type :=
   | shp_top : shp
   | shp_bvar : nat -> shp
   | shp_fvar : atom -> shp
-  | shp_arrow : shp -> shp -> shp
-  | shp_all : shp -> shp -> shp
-  | shp_sum : shp -> shp -> shp
-.
+  | shp_arrow : typ -> typ -> shp
+  | shp_sall : shp -> typ -> shp
+  | shp_call : captureset -> typ -> shp
 
-Inductive captureset : Type :=
-  | cset_universal : captureset
-  | cset_set : atoms -> nats -> captureset
-.
-
-Inductive typ : Set :=
+with typ : Type :=
   | pair : shp -> captureset -> typ
 .
 
-Inductive exp : Set :=
+Inductive exp : Type :=
   | exp_bvar : nat -> exp
   | exp_fvar : atom -> exp
   | exp_abs : typ -> exp -> exp
-  | exp_app : exp -> exp -> exp
-  | exp_tabs : typ -> exp -> exp
-  | exp_tapp : exp -> typ -> exp
-  | exp_let : exp -> exp -> exp
-  | exp_inl : exp -> exp
-  | exp_inr : exp -> exp
-  | exp_case : exp -> exp -> exp -> exp
+  | exp_app : exp -> captureset -> exp -> exp
+  | exp_sabs : shp -> exp -> exp
+  | exp_sapp : exp -> shp -> exp
+  | exp_cabs : captureset -> exp -> exp
+  | exp_capp : exp -> captureset -> exp
 .
 
 (** We declare the constructors for indices and variables to be
@@ -79,8 +71,8 @@ Inductive exp : Set :=
     [(exp_abs typ_top (exp_app 0 x))] instead of [(exp_abs typ_top
     (exp_app (exp_bvar 0) (exp_fvar x)))]. *)
 
-Coercion typ_bvar : nat >-> typ.
-Coercion typ_fvar : atom >-> typ.
+Coercion shp_bvar : nat >-> shp.
+Coercion shp_fvar : atom >-> shp.
 Coercion exp_bvar : nat >-> exp.
 Coercion exp_fvar : atom >-> exp.
 
@@ -117,46 +109,80 @@ Coercion exp_fvar : atom >-> exp.
     index in the term.  This eliminates the need to possibly subtract
     one in the case of indices. *)
 
-Fixpoint open_tt_rec (K : nat) (U : typ) (T : typ)  {struct T} : typ :=
+Fixpoint open_ss_rec (K : nat) (U : shp) (Sh : shp)  {struct Sh} : shp :=
+  match Sh with
+  | shp_top => shp_top
+  | shp_bvar J => if K == J then U else (shp_bvar J)
+  | shp_fvar X => shp_fvar X
+  | shp_arrow T1 T2 => shp_arrow (open_st_rec K U T1) (open_st_rec K U T2)
+  | shp_sall S1 T => shp_sall (open_ss_rec K U S1) (open_st_rec (S K) U T)
+  | shp_call C1 T => shp_call C1 (open_st_rec K U T)
+  end
+with open_st_rec (K : nat) (U : shp) (T : typ)  {struct T} : typ :=
   match T with
-  | typ_top => typ_top
-  | typ_bvar J => if K == J then U else (typ_bvar J)
-  | typ_fvar X => typ_fvar X
-  | typ_arrow T1 T2 => typ_arrow (open_tt_rec K U T1) (open_tt_rec K U T2)
-  | typ_all T1 T2 => typ_all (open_tt_rec K U T1) (open_tt_rec (S K) U T2)
-  | typ_sum T1 T2 => typ_sum (open_tt_rec K U T1) (open_tt_rec K U T2)
+  | pair Sh C => pair (open_ss_rec K U Sh) C
   end.
 
-Fixpoint open_te_rec (K : nat) (U : typ) (e : exp) {struct e} : exp :=
+Fixpoint open_se_rec (K : nat) (U : shp) (e : exp) {struct e}: exp :=
   match e with
-  | exp_bvar i => exp_bvar i
   | exp_fvar x => exp_fvar x
-  | exp_abs V e1 => exp_abs  (open_tt_rec K U V)  (open_te_rec K U e1)
-  | exp_app e1 e2 => exp_app  (open_te_rec K U e1) (open_te_rec K U e2)
-  | exp_tabs V e1 => exp_tabs (open_tt_rec K U V)  (open_te_rec (S K) U e1)
-  | exp_tapp e1 V => exp_tapp (open_te_rec K U e1) (open_tt_rec K U V)
-  | exp_let e1 e2 => exp_let (open_te_rec K U e1) (open_te_rec K U e2)
-  | exp_inl e1 => exp_inl (open_te_rec K U e1)
-  | exp_inr e2 => exp_inr (open_te_rec K U e2)
-  | exp_case e1 e2 e3 =>
-      exp_case (open_te_rec K U e1) (open_te_rec K U e2) (open_te_rec K U e3)
+  | exp_bvar i => exp_bvar i
+  | exp_abs T e1 => exp_abs (open_st_rec K U T)  (open_se_rec K U e1)
+  | exp_app e1 cap e2 => exp_app (open_se_rec K U e1) cap (open_se_rec K U e2)
+  | exp_sabs Sh e1 => exp_sabs (open_ss_rec K U Sh) (open_se_rec (S K) U e1)
+  | exp_sapp e1 Sh => exp_sapp (open_se_rec K U e1) (open_ss_rec K U Sh)
+  | exp_cabs C e1 => exp_cabs C (open_se_rec K U e1)
+  | exp_capp e1 C => exp_capp (open_se_rec K U e1) C
   end.
 
-Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
+Definition open_cc_rec (K : nat) (U : captureset) (C : captureset): captureset :=
+  match C with
+  | cset_universal => cset_universal
+  | cset_set As Ns => match (NatSetImpl.mem K Ns) with
+                      | false => cset_set As Ns
+                      | true => match U with
+                                | cset_universal => cset_universal
+                                | cset_set UAs UNs => cset_set (AtomSetImpl.union UAs As) (NatSetImpl.union (NatSetImpl.remove K Ns) UNs)
+                                end
+                      end
+  end.
+
+Fixpoint open_cs_rec (K : nat) (U : captureset) (Sh : shp)  {struct Sh}: shp :=
+  match Sh with
+  | shp_top => shp_top
+  | shp_bvar J => shp_bvar J
+  | shp_fvar X => shp_fvar X
+  | shp_arrow T1 T2 => shp_arrow (open_ct_rec K U T1) (open_ct_rec (S K) U T2)
+  | shp_sall S1 T => shp_sall (open_cs_rec K U S1) (open_ct_rec K U T)
+  | shp_call C1 T => shp_call (open_cc_rec K U C1) (open_ct_rec (S K) U T)
+  end
+with open_ct_rec (K : nat) (U : captureset) (T : typ)  {struct T}: typ :=
+  match T with
+  | pair Sh C => pair (open_cs_rec K U Sh) (open_cc_rec K U C)
+  end.
+
+Fixpoint open_ce_rec (K : nat) (U : captureset) (e : exp) {struct e}: exp :=
+  match e with
+  | exp_fvar x => exp_fvar x
+  | exp_bvar i => exp_bvar i
+  | exp_abs T e1 => exp_abs (open_ct_rec K U T)  (open_ce_rec (S K) U e1)
+  | exp_app e1 cap e2 => exp_app (open_ce_rec K U e1) (open_cc_rec K U cap) (open_ce_rec K U e2)
+  | exp_sabs Sh e1 => exp_sabs (open_cs_rec K U Sh) (open_ce_rec K U e1)
+  | exp_sapp e1 Sh => exp_sapp (open_ce_rec K U e1) (open_cs_rec K U Sh)
+  | exp_cabs C e1 => exp_cabs (open_cc_rec K U C) (open_ce_rec (S K) U e1)
+  | exp_capp e1 C => exp_capp (open_ce_rec K U e1) (open_cc_rec K U C)
+  end.
+
+Fixpoint open_ee_rec (k : nat) (f : exp) (C :captureset) (e : exp)  {struct e} : exp :=
   match e with
   | exp_bvar i => if k == i then f else (exp_bvar i)
   | exp_fvar x => exp_fvar x
-  | exp_abs V e1 => exp_abs V (open_ee_rec (S k) f e1)
-  | exp_app e1 e2 => exp_app (open_ee_rec k f e1) (open_ee_rec k f e2)
-  | exp_tabs V e1 => exp_tabs V (open_ee_rec k f e1)
-  | exp_tapp e1 V => exp_tapp (open_ee_rec k f e1) V
-  | exp_let e1 e2 => exp_let (open_ee_rec k f e1) (open_ee_rec (S k) f e2)
-  | exp_inl e1 => exp_inl (open_ee_rec k f e1)
-  | exp_inr e2 => exp_inr (open_ee_rec k f e2)
-  | exp_case e1 e2 e3 =>
-      exp_case (open_ee_rec k f e1)
-               (open_ee_rec (S k) f e2)
-               (open_ee_rec (S k) f e3)
+  | exp_abs V e1 => exp_abs V (open_ee_rec (S k) f C e1)
+  | exp_app e1 cap e2 => exp_app (open_ee_rec k f C e1) (open_cc_rec k C cap) (open_ee_rec k f C e2)
+  | exp_sabs Sh e1 => exp_sabs Sh (open_ee_rec k f C e1)
+  | exp_sapp e1 Sh => exp_sapp (open_ee_rec k f C e1) Sh
+  | exp_cabs D e1 => exp_cabs D (open_ee_rec (S k) f C e1)
+  | exp_capp e1 D => exp_capp (open_ee_rec k f C e1) D
   end.
 
 (** Many common applications of opening replace index zero with an
@@ -168,9 +194,16 @@ Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
     Recall that the coercions above let us write [X] in place of
     [(typ_fvar X)], assuming that [X] is an [atom]. *)
 
-Definition open_tt T U := open_tt_rec 0 U T.
-Definition open_te e U := open_te_rec 0 U e.
-Definition open_ee e1 e2 := open_ee_rec 0 e2 e1.
+Definition open_ss Sh2 Sh1 := open_ss_rec 0 Sh1 Sh2.
+Definition open_st T S := open_st_rec 0 S T.
+Definition open_se e S := open_se_rec 0 S e.
+
+Definition open_cc C2 C1 := open_cc_rec 0 C1 C2.
+Definition open_cs S C := open_cs_rec 0 C S.
+Definition open_ct T C := open_ct_rec 0 C T.
+Definition open_ce e C := open_ce_rec 0 C e.
+
+Definition open_ee e1 e2 C := open_ee_rec 0 e2 C e1.
 
 
 (* ********************************************************************** *)
@@ -224,69 +257,69 @@ Definition open_ee e1 e2 := open_ee_rec 0 e2 e1.
     below are equivalent to ones that use existential, and hence also
     universal, quantification. *)
 
-Inductive type : typ -> Prop :=
-  | type_top :
-      type typ_top
-  | type_var : forall X,
-      type (typ_fvar X)
-  | type_arrow : forall T1 T2,
-      type T1 ->
-      type T2 ->
-      type (typ_arrow T1 T2)
-  | type_all : forall L T1 T2,
-      type T1 ->
-      (forall X : atom, X `notin` L -> type (open_tt T2 X)) ->
-      type (typ_all T1 T2)
-  | type_sum : forall T1 T2,
-      type T1 ->
-      type T2 ->
-      type (typ_sum T1 T2)
+Inductive capture : captureset -> Prop :=
+  | cap_atoms : forall (As : atoms),
+      capture (cset_set As {}N)
+  | cap_universal :
+      capture (cset_universal)
 .
+
+Inductive shape : shp -> Prop :=
+  | shape_top :
+      shape shp_top
+  | shape_var : forall X,
+      shape (shp_fvar X)
+  | shape_arrow : forall L T1 T2,
+      type T1 ->
+      (forall X : atom, X `notin` L -> type (open_ct T2 (cset_fvar X))) ->
+      shape (shp_arrow T1 T2)
+  | shape_sall : forall L S T,
+      shape S ->
+      (forall X : atom, X `notin` L -> type (open_st T X)) ->
+      shape (shp_sall S T)
+  | shape_call : forall L C T,
+      capture C ->
+      (forall X : atom, X `notin` L -> type (open_ct T (cset_fvar X))) ->
+      shape (shp_call C T)
+
+with type : typ -> Prop :=
+  | type_pair : forall (Sh :shp) (C : captureset),
+      shape Sh ->
+      capture C ->
+      type (pair Sh C)
+.
+
+Print cset_set.
 
 Inductive expr : exp -> Prop :=
   | expr_var : forall x,
       expr (exp_fvar x)
   | expr_abs : forall L T e1,
       type T ->
-      (forall x : atom, x `notin` L -> expr (open_ee e1 x)) ->
+      (forall x : atom, x `notin` L -> expr (open_ee e1 x (cset_fvar x))) ->
       expr (exp_abs T e1)
-  | expr_app : forall e1 e2,
+  | expr_app : forall e1 C e2,
       expr e1 ->
+      capture C ->
       expr e2 ->
-      expr (exp_app e1 e2)
-  | expr_tabs : forall L T e1,
-      type T ->
-      (forall X : atom, X `notin` L -> expr (open_te e1 X)) ->
-      expr (exp_tabs T e1)
-  | expr_tapp : forall e1 V,
+      expr (exp_app e1 C e2)
+  | expr_sabs : forall L Sh e1,
+      shape Sh ->
+      (forall X : atom, X `notin` L -> expr (open_se e1 X)) ->
+      expr (exp_sabs Sh e1)
+  | expr_sapp : forall e1 V,
       expr e1 ->
-      type V ->
-      expr (exp_tapp e1 V)
-  | expr_let : forall L e1 e2,
+      shape V ->
+      expr (exp_sapp e1 V)
+  | expr_cabs : forall L C e1,
+      capture C ->
+      (forall X : atom, X `notin` L -> expr (open_ce e1 (cset_fvar X))) ->
+      expr (exp_cabs C e1)
+  | expr_capp : forall e1 V,
       expr e1 ->
-      (forall x : atom, x `notin` L -> expr (open_ee e2 x)) ->
-      expr (exp_let e1 e2)
-  | expr_inl : forall e1,
-      expr e1 ->
-      expr (exp_inl e1)
-  | expr_inr : forall e1,
-      expr e1 ->
-      expr (exp_inr e1)
-  | expr_case : forall L e1 e2 e3,
-      expr e1 ->
-      (forall x : atom, x `notin` L -> expr (open_ee e2 x)) ->
-      (forall x : atom, x `notin` L -> expr (open_ee e3 x)) ->
-      expr (exp_case e1 e2 e3)
+      capture V ->
+      expr (exp_capp e1 V)
 .
-
-(** #<a name="body_e_doc"></a># We also define what it means to be the
-    body of an abstraction, since this simplifies slightly the
-    definition of reduction and subsequent proofs.  It is not strictly
-    necessary to make this definition in order to complete the
-    development. *)
-
-Definition body_e (e : exp) :=
-  exists L, forall x : atom, x `notin` L -> expr (open_ee e x).
 
 
 (* ********************************************************************** *)
@@ -307,8 +340,9 @@ Definition body_e (e : exp) :=
     a particular binding is a typing or subtyping assumption.  Thus,
     we instantiate [A] with the type [binding], defined below. *)
 
-Inductive binding : Set :=
-  | bind_sub : typ -> binding
+Inductive binding : Type :=
+  | bind_sub_shp : shp -> binding
+  | bind_sub_cap : captureset -> binding
   | bind_typ : typ -> binding.
 
 (** A binding [(X ~ bind_sub T)] records that a type variable [X] is a
@@ -376,25 +410,41 @@ Notation empty := (@nil (atom * binding)).
     not an expression-variable; [(dom E)] does not distinguish between
     the two kinds of bindings. *)
 
-Inductive wf_typ : env -> typ -> Prop :=
-  | wf_typ_top : forall E,
-      wf_typ E typ_top
-  | wf_typ_var : forall U E (X : atom),
-      binds X (bind_sub U) E ->
-      wf_typ E (typ_fvar X)
-  | wf_typ_arrow : forall E T1 T2,
-      wf_typ E T1 ->
-      wf_typ E T2 ->
-      wf_typ E (typ_arrow T1 T2)
-  | wf_typ_all : forall L E T1 T2,
+Inductive wf_cap : env -> captureset -> Prop :=
+  | wf_cset_universal : forall E,
+      wf_cap E cset_universal
+  | wf_cset_set : forall E (A : atoms),
+      (forall a, AtomSetImpl.In a A -> ((exists U, binds a (bind_sub_cap U) E) \/ (exists V, binds a (bind_typ V) E))) ->
+      wf_cap E (cset_set A {}N) 
+.
+
+Inductive wf_shp : env -> shp -> Prop :=
+  | wf_shp_top : forall E,
+      wf_shp E shp_top
+  | wf_shp_fvar : forall E U (x : atom),
+      binds x (bind_sub_shp U) E ->
+      wf_shp E (shp_fvar x)
+  | wf_shp_arrow : forall L E (T1 : typ) (T2 : typ),
       wf_typ E T1 ->
       (forall X : atom, X `notin` L ->
-        wf_typ (X ~ bind_sub T1 ++ E) (open_tt T2 X)) ->
-      wf_typ E (typ_all T1 T2)
-  | wf_typ_sum : forall E T1 T2,
-      wf_typ E T1 ->
-      wf_typ E T2 ->
-      wf_typ E (typ_sum T1 T2)
+        wf_typ (X ~ bind_typ T1 ++ E) (open_ct T2 (cset_fvar X))) ->
+      wf_shp E (shp_arrow T1 T2)
+  | wf_shp_sall : forall L E S T,
+      wf_shp E S ->
+      (forall X : atom, X `notin` L ->
+        wf_typ (X ~ bind_sub_shp S ++ E) (open_st T X)) ->
+      wf_shp E (shp_sall S T)
+  | wf_shp_call : forall L E C T,
+      wf_cap E C ->
+      (forall X : atom, X `notin` L ->
+        wf_typ (X ~ bind_sub_cap C ++ E) (open_ct T (cset_fvar X))) ->
+      wf_shp E (shp_call C T)
+
+with wf_typ : env -> typ -> Prop :=
+  | wf_pair : forall E S C,
+      wf_shp E S ->
+      wf_cap E C ->
+      wf_typ E (pair S C) 
 .
 
 (** An environment [E] is well-formed, denoted [(wf_env E)], if each
@@ -409,52 +459,87 @@ Inductive wf_typ : env -> typ -> Prop :=
 Inductive wf_env : env -> Prop :=
   | wf_env_empty :
       wf_env empty
-  | wf_env_sub : forall (E : env) (X : atom) (T : typ),
+  | wf_env_sub_shp : forall (E : env) (X : atom) (Sh : shp),
       wf_env E ->
-      wf_typ E T ->
+      wf_shp E Sh ->
       X `notin` dom E ->
-      wf_env (X ~ bind_sub T ++ E)
+      wf_env (X ~ bind_sub_shp Sh ++ E)
+  | wf_env_sub_cap : forall (E : env) (X : atom) (C : captureset),
+      wf_env E ->
+      wf_cap E C ->
+      X `notin` dom E ->
+      wf_env (X ~ bind_sub_cap C ++ E)
   | wf_env_typ : forall (E : env) (x : atom) (T : typ),
       wf_env E ->
       wf_typ E T ->
       x `notin` dom E ->
-      wf_env (x ~ bind_typ T ++ E).
+      wf_env (x ~ bind_typ T ++ E)
+.
 
 
 (* ********************************************************************** *)
 (** * #<a name="sub"></a># Subtyping *)
 
-(** The definition of subtyping is straightforward.  It uses the
-    [binds] relation from the MetatheoryEnv library (in the
-    [sub_trans_tvar] case) and cofinite quantification (in the
-    [sub_all] case). *)
+Inductive sub_cap : env -> captureset -> captureset -> Prop :=
+  | sub_cap_universal : forall E C,
+      wf_env E ->
+      wf_cap E C ->
+      sub_cap E C cset_universal
+  | sub_cap_in : forall E (x : atom) ys,
+      wf_env E ->
+      wf_cap E (cset_set ys {}N) ->
+      x `in` ys ->
+      sub_cap E (cset_fvar x) (cset_set ys {}N)
+  | sub_cap_cvar : forall E (x : atom) ys C,
+      sub_cap E C (cset_set ys {}N) ->
+      binds x (bind_sub_cap C) E ->
+      sub_cap E (cset_fvar x) (cset_set ys {}N)
+  | sub_cap_var : forall E (x : atom) ys C Sh,
+      sub_cap E C (cset_set ys {}N) ->
+      binds x (bind_typ (pair Sh C)) E ->
+      sub_cap E (cset_fvar x) (cset_set ys {}N)
+  | sub_cap_bound : forall E xs ys,
+      wf_env E ->
+      wf_cap E (cset_set xs {}N) ->
+      wf_cap E (cset_set ys {}N) ->
+      AtomSetImpl.For_all (fun x => (sub_cap E (cset_fvar x) (cset_set ys {}N))) xs ->
+      sub_cap E (cset_set xs {}N) (cset_set ys {}N)
+.
 
-Inductive sub : env -> typ -> typ -> Prop :=
-  | sub_top : forall E S,
+Inductive sub_shp : env -> shp -> shp -> Prop :=
+  | sub_shp_top : forall E S,
       wf_env E ->
-      wf_typ E S ->
-      sub E S typ_top
-  | sub_refl_tvar : forall E X,
+      wf_shp E S ->
+      sub_shp E S shp_top
+  | sub_shp_refl_tvar : forall E X,
       wf_env E ->
-      wf_typ E (typ_fvar X) ->
-      sub E (typ_fvar X) (typ_fvar X)
-  | sub_trans_tvar : forall U E T X,
-      binds X (bind_sub U) E ->
-      sub E U T ->
-      sub E (typ_fvar X) T
-  | sub_arrow : forall E S1 S2 T1 T2,
-      sub E T1 S1 ->
-      sub E S2 T2 ->
-      sub E (typ_arrow S1 S2) (typ_arrow T1 T2)
-  | sub_all : forall L E S1 S2 T1 T2,
-      sub E T1 S1 ->
+      wf_shp E (shp_fvar X) ->
+      sub_shp E (shp_fvar X) (shp_fvar X)
+  | sub_shp_trans_tvar : forall U E Sh X,
+      binds X (bind_sub_shp U) E ->
+      sub_shp E U Sh ->
+      sub_shp E (shp_fvar X) Sh
+  | sub_shp_arrow : forall L E S1 S2 T1 T2,
+      sub_typ E T1 S1 ->
       (forall X : atom, X `notin` L ->
-          sub (X ~ bind_sub T1 ++ E) (open_tt S2 X) (open_tt T2 X)) ->
-      sub E (typ_all S1 S2) (typ_all T1 T2)
-  | sub_sum : forall E S1 S2 T1 T2,
-      sub E S1 T1 ->
-      sub E S2 T2 ->
-      sub E (typ_sum S1 S2) (typ_sum T1 T2)
+        sub_typ (X ~ bind_typ T1 ++ E) (open_ct S2 (cset_fvar X)) (open_ct T2 (cset_fvar X))) ->
+      sub_shp E (shp_arrow S1 S2) (shp_arrow T1 T2)
+  | sub_shp_sall : forall L E S1 S2 T1 T2,
+      sub_shp E T1 S1 ->
+      (forall X : atom, X `notin` L -> 
+        sub_typ (X ~ bind_sub_shp T1 ++ E) (open_st S2 X) (open_st T2 X)) ->
+      sub_shp E (shp_sall S1 S2) (shp_sall T1 T2)
+  | sub_shp_call : forall L E S1 S2 T1 T2,
+      sub_cap E T1 S1 -> 
+      (forall X : atom, X `notin` L ->
+        sub_typ (X ~ bind_sub_cap T1 ++ E) (open_ct S2 (cset_fvar X)) (open_ct T2 (cset_fvar X))) ->
+      sub_shp E (shp_call S1 S2) (shp_call T1 T2)
+
+with sub_typ : env -> typ -> typ -> Prop :=
+  | sub_typ_pair : forall E Sh1 Sh2 C1 C2,
+      sub_cap E C1 C2 ->
+      sub_shp E Sh1 Sh2 ->
+      sub_typ E (pair Sh1 C1) (pair Sh2 C2)
 .
 
 
@@ -466,53 +551,55 @@ Inductive sub : env -> typ -> typ -> Prop :=
     and cofinite quantification in the cases involving binders (e.g.,
     [typing_abs] and [typing_tabs]). *)
 
-Inductive typing : env -> exp -> typ -> Prop :=
-  | typing_var : forall E x T,
-      wf_env E ->
-      binds x (bind_typ T) E ->
-      typing E (exp_fvar x) T
-  | typing_abs : forall L E V e1 T1,
-      (forall x : atom, x `notin` L ->
-        typing (x ~ bind_typ V ++ E) (open_ee e1 x) T1) ->
-      typing E (exp_abs V e1) (typ_arrow V T1)
-  | typing_app : forall T1 E e1 e2 T2,
-      typing E e1 (typ_arrow T1 T2) ->
-      typing E e2 T1 ->
-      typing E (exp_app e1 e2) T2
-  | typing_tabs : forall L E V e1 T1,
-      (forall X : atom, X `notin` L ->
-        typing (X ~ bind_sub V ++ E) (open_te e1 X) (open_tt T1 X)) ->
-      typing E (exp_tabs V e1) (typ_all V T1)
-  | typing_tapp : forall T1 E e1 T T2,
-      typing E e1 (typ_all T1 T2) ->
-      sub E T T1 ->
-      typing E (exp_tapp e1 T) (open_tt T2 T)
-  | typing_sub : forall S E e T,
-      typing E e S ->
-      sub E S T ->
-      typing E e T
-  | typing_let : forall L T1 T2 e1 e2 E,
-      typing E e1 T1 ->
-      (forall x : atom, x `notin` L ->
-        typing (x ~ bind_typ T1 ++ E) (open_ee e2 x) T2) ->
-      typing E (exp_let e1 e2) T2
-  | typing_inl : forall T1 T2 e1 E,
-      typing E e1 T1 ->
-      wf_typ E T2 ->
-      typing E (exp_inl e1) (typ_sum T1 T2)
-  | typing_inr : forall T1 T2 e1 E,
-      typing E e1 T2 ->
-      wf_typ E T1 ->
-      typing E (exp_inr e1) (typ_sum T1 T2)
-  | typing_case : forall L T1 T2 T e1 e2 e3 E,
-      typing E e1 (typ_sum T1 T2) ->
-      (forall x : atom, x `notin` L ->
-        typing (x ~ bind_typ T1 ++ E) (open_ee e2 x) T) ->
-      (forall x : atom, x `notin` L ->
-        typing (x ~ bind_typ T2 ++ E) (open_ee e3 x) T) ->
-      typing E (exp_case e1 e2 e3) T
+Fixpoint fv_exp_for_cap (e : exp) {struct e} : atoms :=
+  match e with
+  | exp_fvar x => (AtomSetImpl.singleton x)
+  | exp_bvar n => (AtomSetImpl.empty)
+  | exp_abs T e1 =>(fv_exp_for_cap e1)
+  | exp_app e1 C e2 => (AtomSetImpl.union (fv_exp_for_cap e1)(fv_exp_for_cap e2))
+  | exp_sabs Sh e => (fv_exp_for_cap e)
+  | exp_sapp e1 Sh =>(fv_exp_for_cap e1)
+  | exp_cabs C e1 => (fv_exp_for_cap e1)
+  | exp_capp e1 C => (fv_exp_for_cap e1)
+  end
 .
 
+Inductive typing : env -> exp -> typ -> Prop :=
+  | typing_var : forall E x S C,
+      wf_env E ->
+      binds x (bind_typ (pair S C)) E ->
+      typing E (exp_fvar x) (pair S (cset_fvar x))
+  | typing_abs : forall L E V e1 T1,
+      (forall x : atom, x `notin` L ->
+        typing (x ~ bind_typ V ++ E) (open_ee e1 x (cset_fvar x)) (open_ct T1 (cset_fvar x))) ->
+      typing E (exp_abs V e1) (pair 
+        (shp_arrow V T1) (cset_set (fv_exp_for_cap e1) {}N))
+  | typing_app : forall T1 E e1 e2 T2 C D,
+      typing E e1 (pair (shp_arrow (pair T1 C) T2) D) ->
+      typing E e2 (pair T1 C) ->
+      typing E (exp_app e1 C e2) (open_ct T2 C)
+  | typing_sabs : forall L E V e1 T1,
+      (forall X : atom, X `notin` L ->
+        typing (X ~ bind_sub_shp V ++ E) (open_se e1 X) (open_st T1 X)) ->
+      typing E (exp_sabs V e1) (pair (shp_sall V T1) 
+      (cset_set (fv_exp_for_cap e1) {}N))
+  | typing_sapp : forall Sh1 E e1 Sh T2 C,
+      typing E e1 (pair (shp_sall Sh1 T2) C) ->
+      sub_shp E Sh Sh1 ->
+      typing E (exp_sapp e1 Sh) (open_st T2 Sh)
+  | typing_cabs : forall L E V e1 T1,
+      (forall X : atom, X `notin` L ->
+        typing (X ~ bind_sub_cap V ++ E) (open_ce e1 (cset_fvar X)) (open_ct T1 (cset_fvar X))) ->
+      typing E (exp_cabs V e1) (pair (shp_call V T1) (cset_set (fv_exp_for_cap e1) {}N))
+  | typing_capp : forall C1 E e1 C T2 D,
+      typing E e1 (pair (shp_call C1 T2) D) ->
+      sub_cap E C C1 ->
+      typing E (exp_capp e1 C) (open_ct T2 C)
+  | typing_sub : forall S E e T,
+      typing E e S ->
+      sub_typ E S T ->
+      typing E e T
+.
 
 (* ********************************************************************** *)
 (** * #<a name="values"></a># Values *)
@@ -521,15 +608,12 @@ Inductive value : exp -> Prop :=
   | value_abs : forall T e1,
       expr (exp_abs T e1) ->
       value (exp_abs T e1)
-  | value_tabs : forall T e1,
-      expr (exp_tabs T e1) ->
-      value (exp_tabs T e1)
-  | value_inl : forall e1,
-      value e1 ->
-      value (exp_inl e1)
-  | value_inr : forall e1,
-      value e1 ->
-      value (exp_inr e1)
+  | value_tabs : forall Sh e1,
+      expr (exp_sabs Sh e1) ->
+      value (exp_sabs Sh e1)
+  | value_cabs : forall C e1,
+      expr (exp_cabs C e1) ->
+      value (exp_cabs C e1)
 .
 
 
@@ -537,55 +621,37 @@ Inductive value : exp -> Prop :=
 (** * #<a name="reduction"></a># Reduction *)
 
 Inductive red : exp -> exp -> Prop :=
-  | red_app_1 : forall e1 e1' e2,
+  | red_app_1 : forall C e1 e1' e2,
       expr e2 ->
+      capture C ->
       red e1 e1' ->
-      red (exp_app e1 e2) (exp_app e1' e2)
-  | red_app_2 : forall e1 e2 e2',
+      red (exp_app e1 C e2) (exp_app e1' C e2)
+  | red_app_2 : forall C e1 e2 e2',
       value e1 ->
+      capture C ->
       red e2 e2' ->
-      red (exp_app e1 e2) (exp_app e1 e2')
-  | red_tapp : forall e1 e1' V,
-      type V ->
+      red (exp_app e1 C e2) (exp_app e1 C e2')
+  | red_sapp : forall e1 e1' Sh,
+      shape Sh ->
       red e1 e1' ->
-      red (exp_tapp e1 V) (exp_tapp e1' V)
-  | red_abs : forall T e1 v2,
+      red (exp_sapp e1 Sh) (exp_sapp e1' Sh)
+  | red_capp : forall e1 e1' C,
+      capture C ->
+      red e1 e1' ->
+      red (exp_capp e1 C) (exp_capp e1' C)
+  | red_abs : forall C T e1 v2,
       expr (exp_abs T e1) ->
+      capture C ->
       value v2 ->
-      red (exp_app (exp_abs T e1) v2) (open_ee e1 v2)
-  | red_tabs : forall T1 e1 T2,
-      expr (exp_tabs T1 e1) ->
-      type T2 ->
-      red (exp_tapp (exp_tabs T1 e1) T2) (open_te e1 T2)
-  | red_let_1 : forall e1 e1' e2,
-      red e1 e1' ->
-      body_e e2 ->
-      red (exp_let e1 e2) (exp_let e1' e2)
-  | red_let : forall v1 e2,
-      value v1 ->
-      body_e e2 ->
-      red (exp_let v1 e2) (open_ee e2 v1)
-  | red_inl_1 : forall e1 e1',
-      red e1 e1' ->
-      red (exp_inl e1) (exp_inl e1')
-  | red_inr_1 : forall e1 e1',
-      red e1 e1' ->
-      red (exp_inr e1) (exp_inr e1')
-  | red_case_1 : forall e1 e1' e2 e3,
-      red e1 e1' ->
-      body_e e2 ->
-      body_e e3 ->
-      red (exp_case e1 e2 e3) (exp_case e1' e2 e3)
-  | red_case_inl : forall v1 e2 e3,
-      value v1 ->
-      body_e e2 ->
-      body_e e3 ->
-      red (exp_case (exp_inl v1) e2 e3) (open_ee e2 v1)
-  | red_case_inr : forall v1 e2 e3,
-      value v1 ->
-      body_e e2 ->
-      body_e e3 ->
-      red (exp_case (exp_inr v1) e2 e3) (open_ee e3 v1)
+      red (exp_app (exp_abs T e1) C v2) (open_ee e1 v2 C)
+  | red_sabs : forall Sh1 e1 Sh2,
+      expr (exp_sabs Sh1 e1) ->
+      shape Sh2 ->
+      red (exp_sapp (exp_sabs Sh1 e1) Sh2) (open_se e1 Sh2)
+  | red_cabs : forall C1 e1 C2,
+      expr (exp_cabs C1 e1) ->
+      capture C2 ->
+      red (exp_capp (exp_cabs C1 e1) C2) (open_ce e1 C2)
 .
 
 
@@ -601,8 +667,6 @@ Inductive red : exp -> exp -> Prop :=
     all constructors and then later removes some constructors when
     they cause proof search to take too long.) *)
 
-#[export] Hint Constructors type expr wf_typ wf_env value red : core. 
-#[export] Hint Resolve sub_top sub_refl_tvar sub_arrow : core.
-#[export] Hint Resolve sub_sum typing_inl typing_inr : core.
-#[export] Hint Resolve typing_var typing_app typing_tapp typing_sub : core.
-#[export] Hint Resolve typing_inl typing_inr : core.
+#[export] Hint Constructors sub_typ sub_cap shape capture type expr wf_typ wf_shp wf_cap wf_env value red : core. 
+#[export] Hint Resolve sub_shp_top sub_shp_refl_tvar sub_shp_arrow : core.
+#[export] Hint Resolve typing_var typing_app typing_sapp typing_capp typing_sub : core.
